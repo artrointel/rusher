@@ -42,11 +42,11 @@ button {
 }
 
 .shell.vertical-flow {
-  min-height: max(100vh, 980px);
+  min-height: max(100vh, 1160px);
 }
 
 .game.vertical-flow {
-  height: 920px;
+  height: 1100px;
 }
 
 .stage,
@@ -131,11 +131,11 @@ h1 {
   color: inherit;
   background: transparent;
   cursor: pointer;
-  --box-size: min(23.4%, 195px);
+  --box-size: var(--horizontal-box-size, min(23.4%, 195px));
 }
 
 .measure-strip.vertical {
-  --box-size: min(18vh, 170px);
+  --box-size: var(--vertical-box-size, 120px);
 }
 
 .measure-strip::before {
@@ -199,9 +199,11 @@ h1 {
     rgba(255, 255, 255, 0.04);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
   --box-scale: 0.86;
+  --box-exit-x: 0px;
   --box-exit-y: 0px;
   --box-exit-rotate: 0deg;
-  transform: translate(-50%, calc(-50% + var(--box-exit-y))) rotate(var(--box-exit-rotate))
+  transform: translate(calc(-50% + var(--box-exit-x)), calc(-50% + var(--box-exit-y)))
+    rotate(var(--box-exit-rotate))
     scale(var(--box-scale));
   opacity: 0.52;
   transition:
@@ -248,6 +250,18 @@ h1 {
   --box-exit-y: 92px;
   --box-exit-rotate: 5deg;
   opacity: 0;
+}
+
+.measure-strip.vertical .measure-box.exit-up {
+  --box-exit-x: 120px;
+  --box-exit-y: 0px;
+  --box-exit-rotate: 6deg;
+}
+
+.measure-strip.vertical .measure-box.exit-down {
+  --box-exit-x: -120px;
+  --box-exit-y: 0px;
+  --box-exit-rotate: -6deg;
 }
 
 .measure-box.tempo-faster {
@@ -775,7 +789,7 @@ dd {
   }
 
   .game.vertical-flow {
-    height: max(900px, calc(100svh - 24px));
+    height: max(1040px, calc(100svh - 24px));
   }
 
   .topbar {
@@ -789,11 +803,11 @@ dd {
 
   .measure-strip {
     padding: 0 12px 16px;
-    --box-size: min(23.4%, 140px);
+    --box-size: var(--horizontal-box-size, min(23.4%, 140px));
   }
 
   .measure-strip.vertical {
-    --box-size: min(18svh, 132px);
+    --box-size: var(--vertical-box-size, 104px);
   }
 
   .combo-overlay {

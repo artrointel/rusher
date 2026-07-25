@@ -5,11 +5,11 @@ import { ArrowDownUp, ArrowLeftRight, FileMusic, Pause, Play, RotateCcw, Volume2
 const DEFAULT_SONG_LENGTH = 46;
 const PREROLL_SECONDS = 3;
 const AUDIO_LOOKAHEAD_SECONDS = 1.5;
-const VISIBLE_MEASURES = 6;
-const CENTER_OFFSET = 2;
-const HORIZONTAL_TARGET_POSITION = 28;
+const FUTURE_PREVIEW_MEASURES = 4;
+const EXIT_TRAIL_MEASURES = 1;
 const VERTICAL_TARGET_POSITION = 72;
-const BOX_SLOT_GAP = 23;
+const PREVIEW_SLOT_SCALE = 1.08;
+const STRIP_EDGE_PADDING = 24;
 const HINT_PULSE_WINDOW = 0.18;
 const REFERENCE_BPM = 120;
 const MAX_NATIVE_BPM = 240;
@@ -683,6 +683,67 @@ function createToneEngine() {
     oscillator.addEventListener('ended', () => scheduledNodes.delete(oscillator));
   };
 
+  const playHitSlap = (pitchStep = 0) => {
+    const now = context.currentTime;
+    const start = now + 0.002;
+    const pitchRatio = 2 ** (pitchStep / 12);
+
+    const bodyOscillator = context.createOscillator();
+    const bodyGain = context.createGain();
+    bodyOscillator.type = 'triangle';
+    bodyOscillator.frequency.setValueAtTime(1320 * pitchRatio, start);
+    bodyOscillator.frequency.exponentialRampToValueAtTime(420 * pitchRatio, start + 0.055);
+    bodyGain.gain.setValueAtTime(0.001, start);
+    bodyGain.gain.exponentialRampToValueAtTime(0.22, start + 0.004);
+    bodyGain.gain.exponentialRampToValueAtTime(0.001, start + 0.07);
+    bodyOscillator.connect(bodyGain);
+    bodyGain.connect(master);
+    bodyOscillator.start(start);
+    bodyOscillator.stop(start + 0.09);
+    scheduledNodes.add(bodyOscillator);
+    bodyOscillator.addEventListener('ended', () => scheduledNodes.delete(bodyOscillator));
+
+    const clickOscillator = context.createOscillator();
+    const clickGain = context.createGain();
+    clickOscillator.type = 'square';
+    clickOscillator.frequency.setValueAtTime(2400 * pitchRatio, start);
+    clickGain.gain.setValueAtTime(0.001, start);
+    clickGain.gain.exponentialRampToValueAtTime(0.12, start + 0.002);
+    clickGain.gain.exponentialRampToValueAtTime(0.001, start + 0.018);
+    clickOscillator.connect(clickGain);
+    clickGain.connect(master);
+    clickOscillator.start(start);
+    clickOscillator.stop(start + 0.026);
+    scheduledNodes.add(clickOscillator);
+    clickOscillator.addEventListener('ended', () => scheduledNodes.delete(clickOscillator));
+
+    const noiseLength = Math.floor(context.sampleRate * 0.045);
+    const noiseBuffer = context.createBuffer(1, noiseLength, context.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let index = 0; index < noiseLength; index += 1) {
+      const decay = 1 - index / noiseLength;
+      data[index] = (Math.random() * 2 - 1) * decay;
+    }
+
+    const noiseSource = context.createBufferSource();
+    const noiseFilter = context.createBiquadFilter();
+    const noiseGain = context.createGain();
+    noiseSource.buffer = noiseBuffer;
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.setValueAtTime(1850 * pitchRatio, start);
+    noiseFilter.Q.value = 1.7;
+    noiseGain.gain.setValueAtTime(0.001, start);
+    noiseGain.gain.exponentialRampToValueAtTime(0.16, start + 0.003);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, start + 0.048);
+    noiseSource.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(master);
+    noiseSource.start(start);
+    noiseSource.stop(start + 0.052);
+    scheduledNodes.add(noiseSource);
+    noiseSource.addEventListener('ended', () => scheduledNodes.delete(noiseSource));
+  };
+
   const scheduleSongWindow = (songNotes, audioStart, songOffset) => {
     const windowEnd = songOffset + AUDIO_LOOKAHEAD_SECONDS;
 
@@ -713,9 +774,8 @@ function createToneEngine() {
     scheduledNoteIds.clear();
   };
 
-  const hit = () => {
-    const now = context.currentTime;
-    playTone(880, now, 0.045, 'sine', 0.11);
+  const hit = (pitchStep = 0) => {
+    playHitSlap(pitchStep);
   };
 
   return { context, scheduleSongWindow, stopSong, resetSongSchedule, hit };
@@ -737,8 +797,10 @@ function App() {
   const [tapFlash, setTapFlash] = useState(false);
   const [hintEnabled, setHintEnabled] = useState(false);
   const [flowDirection, setFlowDirection] = useState('horizontal');
+  const [stripSize, setStripSize] = useState({ width: 0, height: 0 });
   const [loadError, setLoadError] = useState('');
   const engineRef = useRef(null);
+  const measureStripRef = useRef(null);
   const startTimeRef = useRef(0);
   const pauseOffsetRef = useRef(0);
   const rafRef = useRef(0);
@@ -874,6 +936,7 @@ function App() {
         : null;
     const result = judgementResult ? { ...judgementResult, id: target.dot.id } : { name: 'Miss', score: 0 };
     const hitCombo = result.id ? combo + 1 : 0;
+    const hitMeasureDotCount = result.id ? measures[target.measureIndex]?.dots.length ?? 2 : 2;
 
     setMeasures((current) => {
       if (!judgementResult) {
@@ -911,7 +974,7 @@ function App() {
     setAttempts((value) => value + 1);
 
     if (result.id) {
-      engineRef.current?.hit();
+      engineRef.current?.hit((hitMeasureDotCount - 2) * 4);
       setSuccessfulHits((value) => value + 1);
       setScore((value) => value + result.score + combo * 6);
       setCombo((value) => {
@@ -997,6 +1060,18 @@ function App() {
 
   useEffect(() => () => engineRef.current?.stopSong(), []);
 
+  useEffect(() => {
+    if (!measureStripRef.current) return undefined;
+
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setStripSize({ width, height });
+    });
+    observer.observe(measureStripRef.current);
+
+    return () => observer.disconnect();
+  }, []);
+
   const currentMeasureIndex = Math.max(
     0,
     Math.min(
@@ -1004,8 +1079,9 @@ function App() {
       measures.findIndex((measure) => songTime >= measure.startTime && songTime < measure.endTime),
     ),
   );
-  const displayStart = currentMeasureIndex - CENTER_OFFSET;
-  const visibleMeasures = Array.from({ length: VISIBLE_MEASURES + 2 }, (_, slotIndex) => {
+  const displayStart = currentMeasureIndex - EXIT_TRAIL_MEASURES;
+  const visibleWindowLength = EXIT_TRAIL_MEASURES + 1 + FUTURE_PREVIEW_MEASURES;
+  const visibleMeasures = Array.from({ length: visibleWindowLength }, (_, slotIndex) => {
     const measureIndex = displayStart + slotIndex;
     const measure = measureIndex >= 0 && measureIndex < measures.length ? measures[measureIndex] : null;
     return {
@@ -1013,11 +1089,44 @@ function App() {
       measureIndex,
       slotOffset: measureIndex - currentMeasureIndex,
     };
-  }).filter((item) => item.measure);
+  }).filter(
+    (item) =>
+      item.measure &&
+      (item.slotOffset >= 0 || item.measure.state === 'cleared' || item.measure.state === 'failed'),
+  );
   const progress = Math.min(100, (songTime / song.duration) * 100);
   const playableMeasureCount = measures.filter((measure) => !measure.countIn).length;
   const clearedMeasures = measures.filter((measure) => !measure.countIn && measure.state === 'cleared').length;
   const accuracy = attempts ? Math.round((successfulHits / attempts) * 100) : 100;
+  const horizontalBoxSize =
+    stripSize.width > 0
+      ? Math.max(
+          54,
+          Math.min(
+            195,
+            (stripSize.width - STRIP_EDGE_PADDING * 2) /
+              (1 + FUTURE_PREVIEW_MEASURES * PREVIEW_SLOT_SCALE),
+          ),
+        )
+      : 120;
+  const horizontalSlotGap = horizontalBoxSize * PREVIEW_SLOT_SCALE;
+  const horizontalTargetLeft =
+    stripSize.width > 0 ? STRIP_EDGE_PADDING + horizontalBoxSize / 2 : 0;
+  const verticalBoxSize =
+    stripSize.height > 0
+      ? Math.max(
+          62,
+          Math.min(
+            195,
+            stripSize.width * 0.45,
+            (stripSize.height - STRIP_EDGE_PADDING * 2) /
+              (1 + FUTURE_PREVIEW_MEASURES * PREVIEW_SLOT_SCALE),
+          ),
+        )
+      : 120;
+  const verticalSlotGap = verticalBoxSize * PREVIEW_SLOT_SCALE;
+  const verticalTargetTop =
+    stripSize.height > 0 ? stripSize.height - STRIP_EDGE_PADDING - verticalBoxSize / 2 : 0;
 
   return (
     <main className={`shell ${flowDirection}-flow`}>
@@ -1066,12 +1175,15 @@ function App() {
           </header>
 
           <button
+            ref={measureStripRef}
             type="button"
             className={`measure-strip ${flowDirection} ${tapFlash ? 'tap' : ''}`}
             onPointerDown={hitRhythm}
             style={{
-              '--target-left': `${HORIZONTAL_TARGET_POSITION}%`,
-              '--target-top': `${VERTICAL_TARGET_POSITION}%`,
+              '--target-left': flowDirection === 'horizontal' ? `${horizontalTargetLeft}px` : '50%',
+              '--target-top': flowDirection === 'vertical' ? `${verticalTargetTop}px` : `${VERTICAL_TARGET_POSITION}%`,
+              '--horizontal-box-size': `${horizontalBoxSize}px`,
+              '--vertical-box-size': `${verticalBoxSize}px`,
             }}
           >
             {attempts > 0 ? (
@@ -1091,11 +1203,11 @@ function App() {
                   style={{
                     '--slot-left':
                       flowDirection === 'horizontal'
-                        ? `${HORIZONTAL_TARGET_POSITION + slotOffset * BOX_SLOT_GAP}%`
+                        ? `${horizontalTargetLeft + slotOffset * horizontalSlotGap}px`
                         : '50%',
                     '--slot-top':
                       flowDirection === 'vertical'
-                        ? `${VERTICAL_TARGET_POSITION - slotOffset * BOX_SLOT_GAP}%`
+                        ? `${verticalTargetTop - slotOffset * verticalSlotGap}px`
                         : '50%',
                   }}
                 >
