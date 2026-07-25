@@ -15,7 +15,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  overflow: hidden;
+  overflow: auto;
 }
 
 button {
@@ -39,6 +39,14 @@ button {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
   gap: 18px;
+}
+
+.shell.vertical-flow {
+  min-height: max(100vh, 980px);
+}
+
+.game.vertical-flow {
+  height: 920px;
 }
 
 .stage,
@@ -123,7 +131,11 @@ h1 {
   color: inherit;
   background: transparent;
   cursor: pointer;
-  --box-size: min(18%, 150px);
+  --box-size: min(23.4%, 195px);
+}
+
+.measure-strip.vertical {
+  --box-size: min(18vh, 170px);
 }
 
 .measure-strip::before {
@@ -176,7 +188,7 @@ h1 {
 .measure-box {
   position: absolute;
   left: var(--slot-left);
-  top: calc(50% - 12px);
+  top: calc(var(--slot-top, 50%) - 12px);
   width: var(--box-size);
   min-width: 0;
   aspect-ratio: 1 / 1;
@@ -187,10 +199,14 @@ h1 {
     rgba(255, 255, 255, 0.04);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
   --box-scale: 0.86;
-  transform: translate(-50%, -50%) scale(var(--box-scale));
+  --box-exit-y: 0px;
+  --box-exit-rotate: 0deg;
+  transform: translate(-50%, calc(-50% + var(--box-exit-y))) rotate(var(--box-exit-rotate))
+    scale(var(--box-scale));
   opacity: 0.52;
   transition:
     left 520ms cubic-bezier(0.2, 0.85, 0.18, 1),
+    top 520ms cubic-bezier(0.2, 0.85, 0.18, 1),
     transform 520ms cubic-bezier(0.2, 0.85, 0.18, 1),
     opacity 260ms ease,
     border-color 260ms ease,
@@ -220,6 +236,18 @@ h1 {
   background:
     linear-gradient(180deg, rgba(255, 107, 138, 0.12), rgba(255, 255, 255, 0.025)),
     rgba(255, 255, 255, 0.035);
+}
+
+.measure-box.exit-up {
+  --box-exit-y: -92px;
+  --box-exit-rotate: -5deg;
+  opacity: 0;
+}
+
+.measure-box.exit-down {
+  --box-exit-y: 92px;
+  --box-exit-rotate: 5deg;
+  opacity: 0;
 }
 
 .measure-box.tempo-faster {
@@ -299,7 +327,117 @@ h1 {
 .beat-dot.hit {
   fill: #36cfc9;
   stroke: #36cfc9;
-  animation: shatter 220ms ease forwards;
+  animation: shatter 260ms cubic-bezier(0.12, 0.82, 0.24, 1) forwards;
+}
+
+.hit-burst {
+  pointer-events: none;
+}
+
+.hit-burst.combo-intensity-1 {
+  opacity: 0.3;
+}
+
+.hit-burst.combo-intensity-2 {
+  opacity: 0.45;
+}
+
+.hit-burst.combo-intensity-3 {
+  opacity: 0.6;
+}
+
+.burst-flash {
+  fill: #f8fbff;
+  filter: drop-shadow(0 0 10px rgba(248, 251, 255, 0.95));
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: hit-flash 260ms ease-out forwards;
+}
+
+.combo-intensity-2 .burst-flash {
+  filter: drop-shadow(0 0 15px rgba(248, 251, 255, 1));
+}
+
+.combo-intensity-3 .burst-flash {
+  filter: drop-shadow(0 0 20px rgba(248, 251, 255, 1)) drop-shadow(0 0 14px rgba(255, 107, 138, 0.55));
+}
+
+.burst-ring {
+  fill: none;
+  stroke: #36cfc9;
+  stroke-width: 3;
+  filter: drop-shadow(0 0 8px rgba(54, 207, 201, 0.9));
+  vector-effect: non-scaling-stroke;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: hit-ring 420ms cubic-bezier(0.12, 0.82, 0.24, 1) forwards;
+}
+
+.combo-intensity-2 .burst-ring {
+  stroke-width: 3.6;
+  filter: drop-shadow(0 0 12px rgba(54, 207, 201, 0.95));
+}
+
+.combo-intensity-3 .burst-ring {
+  stroke-width: 4.2;
+  filter: drop-shadow(0 0 14px rgba(54, 207, 201, 1)) drop-shadow(0 0 10px rgba(245, 200, 76, 0.6));
+}
+
+.burst-spark {
+  stroke: #f5c84c;
+  stroke-linecap: round;
+  stroke-width: 3.4;
+  filter: drop-shadow(0 0 7px rgba(245, 200, 76, 0.9));
+  vector-effect: non-scaling-stroke;
+  animation: hit-spark 460ms ease-out forwards;
+  animation-delay: var(--spark-delay, 0ms);
+}
+
+.combo-intensity-2 .burst-spark {
+  filter: drop-shadow(0 0 10px rgba(245, 200, 76, 0.95));
+}
+
+.combo-intensity-3 .burst-spark {
+  filter: drop-shadow(0 0 12px rgba(245, 200, 76, 1)) drop-shadow(0 0 8px rgba(255, 107, 138, 0.65));
+}
+
+.good-burst-core {
+  fill: rgba(94, 169, 255, 0.42);
+  filter: drop-shadow(0 0 8px rgba(94, 169, 255, 0.68));
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: good-core 360ms ease-out forwards;
+}
+
+.combo-intensity-2 .good-burst-core {
+  fill: rgba(94, 169, 255, 0.52);
+  filter: drop-shadow(0 0 12px rgba(94, 169, 255, 0.82));
+}
+
+.combo-intensity-3 .good-burst-core {
+  fill: rgba(94, 169, 255, 0.62);
+  filter: drop-shadow(0 0 16px rgba(94, 169, 255, 0.95)) drop-shadow(0 0 10px rgba(54, 207, 201, 0.45));
+}
+
+.good-burst-ring {
+  fill: none;
+  stroke: #5ea9ff;
+  stroke-width: 2.8;
+  filter: drop-shadow(0 0 8px rgba(94, 169, 255, 0.72));
+  vector-effect: non-scaling-stroke;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: good-ring 520ms ease-out forwards;
+}
+
+.combo-intensity-2 .good-burst-ring {
+  stroke-width: 3.2;
+  filter: drop-shadow(0 0 12px rgba(94, 169, 255, 0.86));
+}
+
+.combo-intensity-3 .good-burst-ring {
+  stroke-width: 3.7;
+  filter: drop-shadow(0 0 16px rgba(94, 169, 255, 0.95)) drop-shadow(0 0 9px rgba(54, 207, 201, 0.5));
 }
 
 .beat-dot.missed {
@@ -320,7 +458,7 @@ h1 {
 .measure-strip::after {
   content: "";
   position: absolute;
-  left: 50%;
+  left: var(--target-left, 50%);
   top: 10%;
   bottom: 14%;
   width: 2px;
@@ -328,6 +466,17 @@ h1 {
   background: linear-gradient(180deg, transparent, rgba(248, 251, 255, 0.8), transparent);
   box-shadow: 0 0 16px rgba(248, 251, 255, 0.35);
   transform: translateX(-50%);
+}
+
+.measure-strip.vertical::after {
+  left: 8%;
+  right: 8%;
+  top: calc(var(--target-top, 50%) - 12px);
+  bottom: auto;
+  width: auto;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(248, 251, 255, 0.8), transparent);
+  transform: translateY(-50%);
 }
 
 .progress {
@@ -435,9 +584,98 @@ dd {
     r: 5.5;
   }
 
+  55% {
+    opacity: 0.9;
+    r: 8.5;
+  }
+
   100% {
-    opacity: 0.2;
-    r: 8;
+    opacity: 0;
+    r: 1;
+  }
+}
+
+@keyframes hit-flash {
+  0% {
+    opacity: 1;
+    transform: scale(0.8);
+  }
+
+  70% {
+    opacity: 0.55;
+    transform: scale(var(--flash-scale, 2.8));
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(calc(var(--flash-scale, 2.8) + 0.6));
+  }
+}
+
+@keyframes hit-ring {
+  0% {
+    opacity: 1;
+    r: 5;
+    stroke-width: 3.5;
+    transform: scale(0.72);
+  }
+
+  70% {
+    opacity: 0.82;
+    r: 15;
+    stroke-width: 2;
+    transform: scale(var(--ring-scale, 3));
+  }
+
+  100% {
+    opacity: 0;
+    r: 23;
+    stroke-width: 0.4;
+    transform: scale(calc(var(--ring-scale, 3) + 0.35));
+  }
+}
+
+@keyframes hit-spark {
+  0% {
+    opacity: 0;
+    stroke-dasharray: 0 24;
+    stroke-width: 4.4;
+  }
+
+  18% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    stroke-dasharray: 24 24;
+    stroke-width: 0.8;
+  }
+}
+
+@keyframes good-core {
+  0% {
+    opacity: 0.75;
+    transform: scale(0.9);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(var(--good-core-scale, 2.1));
+  }
+}
+
+@keyframes good-ring {
+  0% {
+    opacity: 0.82;
+    r: 5.5;
+    stroke-width: 2.8;
+  }
+
+  100% {
+    opacity: 0;
+    r: var(--good-ring-radius, 18);
+    stroke-width: 0.8;
   }
 }
 
@@ -536,6 +774,10 @@ dd {
     grid-template-rows: minmax(0, 1fr) auto;
   }
 
+  .game.vertical-flow {
+    height: max(900px, calc(100svh - 24px));
+  }
+
   .topbar {
     min-height: 78px;
     padding: 16px;
@@ -547,7 +789,11 @@ dd {
 
   .measure-strip {
     padding: 0 12px 16px;
-    --box-size: min(18%, 108px);
+    --box-size: min(23.4%, 140px);
+  }
+
+  .measure-strip.vertical {
+    --box-size: min(18svh, 132px);
   }
 
   .combo-overlay {
@@ -559,7 +805,7 @@ dd {
   }
 
   .measure-glyph {
-    width: min(80%, 108px);
+    width: min(80%, 140px);
   }
 
   .hud {

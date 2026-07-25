@@ -1,12 +1,15 @@
 import { Midi } from '@tonejs/midi';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FileMusic, Pause, Play, RotateCcw, Volume2 } from 'lucide-react';
+import { ArrowDownUp, ArrowLeftRight, FileMusic, Pause, Play, RotateCcw, Volume2 } from 'lucide-react';
 
 const DEFAULT_SONG_LENGTH = 46;
 const PREROLL_SECONDS = 3;
 const AUDIO_LOOKAHEAD_SECONDS = 1.5;
-const VISIBLE_MEASURES = 5;
-const CENTER_OFFSET = Math.floor(VISIBLE_MEASURES / 2);
+const VISIBLE_MEASURES = 6;
+const CENTER_OFFSET = 2;
+const HORIZONTAL_TARGET_POSITION = 28;
+const VERTICAL_TARGET_POSITION = 72;
+const BOX_SLOT_GAP = 23;
 const HINT_PULSE_WINDOW = 0.18;
 const REFERENCE_BPM = 120;
 const MAX_NATIVE_BPM = 240;
@@ -16,6 +19,24 @@ const JUDGEMENTS = [
   { name: 'Perfect', window: 0.055, score: 1000 },
   { name: 'Good', window: 0.16, score: 450 },
 ];
+const BURST_COLORS = ['#36cfc9', '#f5c84c', '#ff6b8a', '#f8fbff'];
+const DEFAULT_BURST = {
+  intensity: 1,
+  flashScale: 2.8,
+  ringScale: 3,
+  sparks: Array.from({ length: 8 }, (_, index) => {
+    const angle = (Math.PI * 2 * index) / 8;
+    return {
+      x1: Math.cos(angle) * 7,
+      y1: Math.sin(angle) * 7,
+      x2: Math.cos(angle) * 22,
+      y2: Math.sin(angle) * 22,
+      color: BURST_COLORS[index % BURST_COLORS.length],
+      delay: 0,
+      width: 3,
+    };
+  }),
+};
 
 function midiToFrequency(midi) {
   return 440 * 2 ** ((midi - 69) / 12);
@@ -25,8 +46,50 @@ function cloneMeasures(measures) {
   return measures.map((measure) => ({
     ...measure,
     state: 'waiting',
-    dots: measure.dots.map((dot) => ({ ...dot, hit: false, hitOrder: null, missed: false })),
+    dots: measure.dots.map((dot) => ({
+      ...dot,
+      hit: false,
+      hitOrder: null,
+      missed: false,
+      burst: null,
+      hitJudgement: null,
+    })),
   }));
+}
+
+function getComboIntensity(comboValue) {
+  if (comboValue >= 100) return 3;
+  if (comboValue >= 10) return 2;
+  return 1;
+}
+
+function createHitBurst(intensity = 1) {
+  const power = Math.max(1, Math.min(3, intensity));
+  const sparkCount = 7 + Math.floor(Math.random() * 6) + (power - 1) * 4;
+  const spin = Math.random() * Math.PI * 2;
+
+  return {
+    intensity: power,
+    flashScale: 2.2 + Math.random() * 1.2 + (power - 1) * 0.7,
+    ringScale: 2.6 + Math.random() * 1.1 + (power - 1) * 0.55,
+    sparks: Array.from({ length: sparkCount }, (_, index) => {
+      const spread = (Math.PI * 2 * index) / sparkCount;
+      const angle = spread + spin + (Math.random() - 0.5) * (0.55 + (power - 1) * 0.12);
+      const startDistance = 5 + Math.random() * 4 + (power - 1) * 1.5;
+      const endDistance = 15 + Math.random() * 14 + (power - 1) * 8;
+      const color = BURST_COLORS[Math.floor(Math.random() * BURST_COLORS.length)];
+
+      return {
+        x1: Math.cos(angle) * startDistance,
+        y1: Math.sin(angle) * startDistance,
+        x2: Math.cos(angle) * endDistance,
+        y2: Math.sin(angle) * endDistance,
+        color,
+        delay: Math.random() * 80,
+        width: 2.2 + Math.random() * 2.4 + (power - 1) * 0.55,
+      };
+    }),
+  };
 }
 
 function getDotPosition(beatIndex, beatCount, radius = 42) {
@@ -84,6 +147,73 @@ function MeasureGlyph({ beatCount, hintEnabled, measure, songTime }) {
             key={`${measure.id}-${beatIndex}`}
             r="5.5"
           />
+        );
+      })}
+      {hitDots.map((dot) => {
+        const { x, y } = getDotPosition(dot.beatIndex, beatCount, 33);
+        const cx = 50 + x;
+        const cy = 50 + y;
+        const burst = dot.burst ?? DEFAULT_BURST;
+        const isGood = dot.hitJudgement === 'Good';
+        const intensity = burst.intensity ?? 1;
+        return (
+          <g
+            className={`hit-burst combo-intensity-${intensity} ${isGood ? 'good' : 'perfect'}`}
+            key={`burst-${dot.id}`}
+          >
+            {isGood ? (
+              <>
+                <circle
+                  className="good-burst-core"
+                  cx={cx}
+                  cy={cy}
+                  r="4"
+                  style={{ '--good-core-scale': 1.9 + intensity * 0.45 }}
+                />
+                <circle
+                  className="good-burst-ring"
+                  cx={cx}
+                  cy={cy}
+                  r="6"
+                  style={{ '--good-ring-radius': 15 + intensity * 5 }}
+                />
+              </>
+            ) : (
+              <>
+                <circle
+                  className="burst-flash"
+                  cx={cx}
+                  cy={cy}
+                  r="3.5"
+                  style={{ '--flash-scale': burst.flashScale }}
+                />
+                <circle
+                  className="burst-ring"
+                  cx={cx}
+                  cy={cy}
+                  r="6"
+                  style={{ '--ring-scale': burst.ringScale }}
+                />
+                {burst.sparks.map((spark, index) => {
+                  return (
+                    <line
+                      className="burst-spark"
+                      x1={cx + spark.x1}
+                      x2={cx + spark.x2}
+                      y1={cy + spark.y1}
+                      y2={cy + spark.y2}
+                      key={`${dot.id}-spark-${index}`}
+                      style={{
+                        '--spark-delay': `${spark.delay}ms`,
+                        stroke: spark.color,
+                        strokeWidth: spark.width,
+                      }}
+                    />
+                  );
+                })}
+              </>
+            )}
+          </g>
         );
       })}
     </svg>
@@ -606,6 +736,7 @@ function App() {
   const [successfulHits, setSuccessfulHits] = useState(0);
   const [tapFlash, setTapFlash] = useState(false);
   const [hintEnabled, setHintEnabled] = useState(false);
+  const [flowDirection, setFlowDirection] = useState('horizontal');
   const [loadError, setLoadError] = useState('');
   const engineRef = useRef(null);
   const startTimeRef = useRef(0);
@@ -742,6 +873,7 @@ function App() {
         ? JUDGEMENTS.find((item) => target.delta <= item.window)
         : null;
     const result = judgementResult ? { ...judgementResult, id: target.dot.id } : { name: 'Miss', score: 0 };
+    const hitCombo = result.id ? combo + 1 : 0;
 
     setMeasures((current) => {
       if (!judgementResult) {
@@ -757,7 +889,16 @@ function App() {
 
         const hitCount = item.dots.filter((dot) => dot.hit).length;
         const dots = item.dots.map((dot) =>
-          dot.id === target.dot.id ? { ...dot, hit: true, hitOrder: hitCount + 1, missed: false } : dot,
+          dot.id === target.dot.id
+            ? {
+                ...dot,
+                hit: true,
+                hitOrder: hitCount + 1,
+                missed: false,
+                burst: createHitBurst(getComboIntensity(hitCombo)),
+                hitJudgement: result.name,
+              }
+            : dot,
         );
         const finished = dots.length > 0 && dots.every((dot) => dot.hit);
         const failed = dots.some((dot) => dot.missed);
@@ -879,8 +1020,8 @@ function App() {
   const accuracy = attempts ? Math.round((successfulHits / attempts) * 100) : 100;
 
   return (
-    <main className="shell">
-      <section className="game">
+    <main className={`shell ${flowDirection}-flow`}>
+      <section className={`game ${flowDirection}-flow`}>
         <div className="stage">
           <header className="topbar">
             <div>
@@ -912,10 +1053,27 @@ function App() {
               >
                 H
               </button>
+              <button
+                type="button"
+                className={flowDirection === 'vertical' ? 'active' : ''}
+                onClick={() => setFlowDirection((value) => (value === 'horizontal' ? 'vertical' : 'horizontal'))}
+                aria-label="Toggle box flow"
+                title={flowDirection === 'horizontal' ? 'Horizontal flow' : 'Vertical flow'}
+              >
+                {flowDirection === 'horizontal' ? <ArrowLeftRight size={18} /> : <ArrowDownUp size={18} />}
+              </button>
             </div>
           </header>
 
-          <button type="button" className={`measure-strip ${tapFlash ? 'tap' : ''}`} onPointerDown={hitRhythm}>
+          <button
+            type="button"
+            className={`measure-strip ${flowDirection} ${tapFlash ? 'tap' : ''}`}
+            onPointerDown={hitRhythm}
+            style={{
+              '--target-left': `${HORIZONTAL_TARGET_POSITION}%`,
+              '--target-top': `${VERTICAL_TARGET_POSITION}%`,
+            }}
+          >
             {attempts > 0 ? (
               <span className={`combo-overlay ${comboBurst.judgement.toLowerCase()}`} key={comboBurst.id}>
                 <span>{comboBurst.judgement}</span>
@@ -925,10 +1083,21 @@ function App() {
             {visibleMeasures.map(({ measure, slotOffset }) =>
                 <span
                   className={`measure-box ${slotOffset === 0 ? 'current' : ''} ${measure.state} ${
+                    slotOffset < 0 && measure.state === 'cleared' ? 'exit-up' : ''
+                  } ${slotOffset < 0 && measure.state === 'failed' ? 'exit-down' : ''} ${
                     measure.tempoChange ? `tempo-${measure.tempoChange}` : ''
                   }`}
                   key={measure.id}
-                  style={{ '--slot-left': `${50 + slotOffset * 20}%` }}
+                  style={{
+                    '--slot-left':
+                      flowDirection === 'horizontal'
+                        ? `${HORIZONTAL_TARGET_POSITION + slotOffset * BOX_SLOT_GAP}%`
+                        : '50%',
+                    '--slot-top':
+                      flowDirection === 'vertical'
+                        ? `${VERTICAL_TARGET_POSITION - slotOffset * BOX_SLOT_GAP}%`
+                        : '50%',
+                  }}
                 >
                   <span className="measure-number">{measure.countIn ? 'IN' : measure.number}</span>
                   <MeasureGlyph
