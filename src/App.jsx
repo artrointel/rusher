@@ -308,6 +308,49 @@ function pickMelodyCandidates(slotMap) {
   return melody;
 }
 
+function pruneDenseMelody(candidates, boxSlots) {
+  const byMeasure = new Map();
+
+  candidates.forEach((candidate, index) => {
+    const group = byMeasure.get(candidate.measureIndex) ?? [];
+    const previous = candidates[index - 1];
+    const next = candidates[index + 1];
+    const melodicChange = Math.max(
+      previous ? Math.abs(candidate.midi - previous.midi) : 0,
+      next ? Math.abs(candidate.midi - next.midi) : 0,
+    );
+    const importance =
+      (candidate.beatIndex === 0 ? 2.5 : 0) +
+      (candidate.beatIndex === boxSlots - 1 ? 0.6 : 0) +
+      Math.min(2, melodicChange / 7) +
+      Math.min(1.2, (candidate.duration ?? 0) / 0.45) +
+      (candidate.velocity ?? 0.5) * 0.8 +
+      (candidate.melodyScore ?? 0);
+
+    group.push({ ...candidate, importance });
+    byMeasure.set(candidate.measureIndex, group);
+  });
+
+  let denseRun = 0;
+
+  return [...byMeasure.entries()]
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .flatMap(([, group]) => {
+      const isFull = group.length >= boxSlots;
+      denseRun = isFull ? denseRun + 1 : 0;
+
+      if (!isFull || denseRun <= 6 || denseRun % 4 !== 0) {
+        return group.sort((a, b) => a.beatIndex - b.beatIndex);
+      }
+
+      return group
+        .sort((a, b) => b.importance - a.importance)
+        .slice(0, Math.max(1, boxSlots - 1))
+        .sort((a, b) => a.beatIndex - b.beatIndex);
+    })
+    .sort((a, b) => a.measureIndex - b.measureIndex || a.beatIndex - b.beatIndex);
+}
+
 function chooseMusicalGrid({ beatsPerMeasure, midi, notes, normalizedBeatTicks }) {
   const subdivisionCandidates = [1, 2, 4];
   const scoredSubdivisions = subdivisionCandidates.map((subdivision) => {
@@ -385,9 +428,11 @@ function chooseMusicalGrid({ beatsPerMeasure, midi, notes, normalizedBeatTicks }
   const candidates = pickMelodyCandidates(notesBySlot).map((candidate) => {
     const quantizedTicks = candidate.globalSlot * slotDurationTicks;
     return {
+      duration: candidate.duration,
       id: candidate.id,
       measureIndex: Math.floor(candidate.globalSlot / boxSlots),
       beatIndex: candidate.globalSlot % boxSlots,
+      melodyScore: candidate.melodyScore,
       midi: candidate.midi,
       velocity: candidate.velocity,
       time: midi.header.ticksToSeconds(quantizedTicks) + PREROLL_SECONDS,
@@ -398,7 +443,7 @@ function chooseMusicalGrid({ beatsPerMeasure, midi, notes, normalizedBeatTicks }
   return {
     boxDurationTicks,
     boxSlots,
-    candidates,
+    candidates: pruneDenseMelody(candidates, boxSlots),
     slotDurationTicks,
     subdivision: selected.subdivision,
   };
