@@ -178,15 +178,19 @@ function MeasureGlyph({ beatCount, hintEnabled, measure, songTime }) {
         const beatTime = dot?.time ?? measure.startTime + (measure.endTime - measure.startTime) * beatProgress;
         const shouldHint = hintEnabled && !dot?.hit && Math.abs(beatTime - songTime) <= HINT_PULSE_WINDOW;
         return (
-          <circle
-            className={`beat-dot ${dot ? 'active' : 'empty'} ${dot?.hit ? 'hit' : ''} ${
-              dot?.missed ? 'missed' : ''
-            } ${shouldHint ? 'hint' : ''}`}
-            cx={50 + x}
-            cy={50 + y}
-            key={`${measure.id}-${beatIndex}`}
-            r="5.5"
-          />
+          <g key={`${measure.id}-${beatIndex}`}>
+            {shouldHint ? (
+              <circle className="hint-ring" cx={50 + x} cy={50 + y} r="7" />
+            ) : null}
+            <circle
+              className={`beat-dot ${dot ? 'active' : 'empty'} ${dot?.hit ? 'hit' : ''} ${
+                dot?.missed ? 'missed' : ''
+              } ${shouldHint ? 'hint' : ''}`}
+              cx={50 + x}
+              cy={50 + y}
+              r="5.5"
+            />
+          </g>
         );
       })}
       {hitDots.map((dot) => {
@@ -758,10 +762,34 @@ function createToneEngine() {
 
   const context = new AudioContext();
   const master = context.createGain();
+  const analyser = context.createAnalyser();
   master.gain.value = 0.32;
-  master.connect(context.destination);
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.82;
+  master.connect(analyser);
+  analyser.connect(context.destination);
+  const frequencyData = new Uint8Array(analyser.frequencyBinCount);
   const scheduledNodes = new Set();
   const scheduledNoteIds = new Set();
+
+  const getVisualizerData = () => {
+    analyser.getByteFrequencyData(frequencyData);
+    const third = Math.floor(frequencyData.length / 3);
+    const average = (start, end) => {
+      let sum = 0;
+      for (let index = start; index < end; index += 1) {
+        sum += frequencyData[index];
+      }
+      return sum / Math.max(1, (end - start) * 255);
+    };
+
+    const bass = average(0, third);
+    const mid = average(third, third * 2);
+    const treble = average(third * 2, frequencyData.length);
+    const level = Math.min(1, bass * 0.48 + mid * 0.34 + treble * 0.28);
+
+    return { bass, level, mid, treble };
+  };
 
   const playTone = (frequency, start, duration, type = 'sine', gain = 0.3) => {
     const oscillator = context.createOscillator();
@@ -880,7 +908,7 @@ function createToneEngine() {
     playHitSlap(pitchStep, volume);
   };
 
-  return { context, scheduleSongWindow, stopSong, resetSongSchedule, hit };
+  return { context, getVisualizerData, scheduleSongWindow, stopSong, resetSongSchedule, hit };
 }
 
 function App() {
@@ -896,13 +924,15 @@ function App() {
   const [comboBurst, setComboBurst] = useState({ combo: 0, id: 0, judgement: 'Ready' });
   const [attempts, setAttempts] = useState(0);
   const [successfulHits, setSuccessfulHits] = useState(0);
+  const [judgementCounts, setJudgementCounts] = useState({ Perfect: 0, Good: 0, Miss: 0 });
   const [tapFlash, setTapFlash] = useState(false);
-  const [hintEnabled, setHintEnabled] = useState(false);
+  const [hintEnabled, setHintEnabled] = useState(true);
   const [flowDirection, setFlowDirection] = useState('horizontal');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sfxVolume, setSfxVolume] = useState(70);
   const [selectedBuiltinMidi, setSelectedBuiltinMidi] = useState('');
   const [builtinDifficulties, setBuiltinDifficulties] = useState({});
+  const [visualizer, setVisualizer] = useState({ bass: 0, level: 0, mid: 0, treble: 0 });
   const [stripSize, setStripSize] = useState({ width: 0, height: 0 });
   const [loadError, setLoadError] = useState('');
   const engineRef = useRef(null);
@@ -934,6 +964,7 @@ function App() {
     setComboBurst({ combo: 0, id: 0, judgement: status });
     setAttempts(0);
     setSuccessfulHits(0);
+    setJudgementCounts({ Perfect: 0, Good: 0, Miss: 0 });
     pauseOffsetRef.current = 0;
   }, []);
 
@@ -1171,6 +1202,10 @@ function App() {
 
     setJudgement(result.name);
     setAttempts((value) => value + 1);
+    setJudgementCounts((counts) => ({
+      ...counts,
+      [result.name]: (counts[result.name] ?? 0) + 1,
+    }));
 
     if (result.id) {
       engineRef.current?.hit((hitMeasureDotCount - 2) * 4, sfxVolume / 100);
@@ -1196,6 +1231,7 @@ function App() {
       const nextTime = audioNow - startTimeRef.current;
       songTimeRef.current = nextTime;
       setSongTime(nextTime);
+      setVisualizer(engineRef.current?.getVisualizerData() ?? { bass: 0, level: 0, mid: 0, treble: 0 });
       engineRef.current?.scheduleSongWindow(song.songNotes, audioNow, nextTime);
 
       setMeasures((current) => {
@@ -1222,6 +1258,7 @@ function App() {
 
         if (missedDots > 0) {
           setAttempts((value) => value + missedDots);
+          setJudgementCounts((counts) => ({ ...counts, Miss: counts.Miss + missedDots }));
           setCombo(0);
           setJudgement('Miss');
           setComboBurst((burst) => ({ combo: 0, id: burst.id + 1, judgement: 'Miss' }));
@@ -1242,7 +1279,10 @@ function App() {
     };
 
     rafRef.current = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(rafRef.current);
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      setVisualizer({ bass: 0, level: 0, mid: 0, treble: 0 });
+    };
   }, [gameState, song.duration, song.songNotes]);
 
   useEffect(() => {
@@ -1296,7 +1336,13 @@ function App() {
   const progress = Math.min(100, (songTime / song.duration) * 100);
   const playableMeasureCount = measures.filter((measure) => !measure.countIn).length;
   const clearedMeasures = measures.filter((measure) => !measure.countIn && measure.state === 'cleared').length;
+  const completedGameNotes = measures.reduce(
+    (sum, measure) => sum + measure.dots.filter((dot) => dot.hit || dot.missed).length,
+    0,
+  );
+  const noteProgress = song.gameNoteCount ? Math.min(100, Math.round((completedGameNotes / song.gameNoteCount) * 100)) : 0;
   const accuracy = attempts ? Math.round((successfulHits / attempts) * 100) : 100;
+  const resultAccuracy = attempts ? Math.round((successfulHits / attempts) * 100) : 0;
   const horizontalBoxSize =
     stripSize.width > 0
       ? Math.max(
@@ -1331,6 +1377,25 @@ function App() {
     <main className={`shell ${flowDirection}-flow`}>
       <section className={`game ${flowDirection}-flow`}>
         <div className="stage">
+          <div
+            className="audio-visualizer"
+            aria-hidden="true"
+            style={{
+              '--viz-bass': visualizer.bass,
+              '--viz-level': visualizer.level,
+              '--viz-mid': visualizer.mid,
+              '--viz-treble': visualizer.treble,
+            }}
+          >
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
           <header className="topbar">
             <div>
               <p className="eyebrow">Rusher</p>
@@ -1501,22 +1566,8 @@ function App() {
           </div>
           <dl>
             <div>
-              <dt>Score</dt>
-              <dd>{score.toLocaleString()}</dd>
-            </div>
-            <div>
-              <dt>Combo</dt>
-              <dd>{combo}</dd>
-            </div>
-            <div>
-              <dt>Max</dt>
-              <dd>{maxCombo}</dd>
-            </div>
-            <div>
-              <dt>Bars</dt>
-              <dd>
-                {clearedMeasures}/{playableMeasureCount}
-              </dd>
+              <dt>Progress</dt>
+              <dd>{noteProgress}%</dd>
             </div>
             <div>
               <dt>Accuracy</dt>
@@ -1524,15 +1575,66 @@ function App() {
             </div>
             <div>
               <dt>Notes</dt>
-              <dd>{song.gameNoteCount}</dd>
+              <dd>
+                {completedGameNotes}/{song.gameNoteCount}
+              </dd>
+            </div>
+            <div>
+              <dt>Bars</dt>
+              <dd>{clearedMeasures}/{playableMeasureCount}</dd>
+            </div>
+            <div>
+              <dt>Combo</dt>
+              <dd>{combo}</dd>
+            </div>
+            <div>
+              <dt>Score</dt>
+              <dd>{score.toLocaleString()}</dd>
             </div>
           </dl>
           {loadError ? <p className="error">{loadError}</p> : null}
           <div className="meter">
-            <span style={{ height: `${Math.min(100, 28 + combo * 2)}%` }} />
+            <span style={{ height: `${noteProgress}%` }} />
           </div>
         </aside>
       </section>
+      {gameState === 'ended' ? (
+        <div className="result-backdrop" role="presentation">
+          <section className="result-dialog" role="dialog" aria-modal="true" aria-label="Song result">
+            <p className="eyebrow">Result</p>
+            <h2>{song.title}</h2>
+            <dl className="result-stats">
+              <div>
+                <dt>Score</dt>
+                <dd>{score.toLocaleString()}</dd>
+              </div>
+              <div>
+                <dt>Max Combo</dt>
+                <dd>{maxCombo}</dd>
+              </div>
+              <div>
+                <dt>Accuracy</dt>
+                <dd>{resultAccuracy}%</dd>
+              </div>
+              <div>
+                <dt>Perfect</dt>
+                <dd>{judgementCounts.Perfect}</dd>
+              </div>
+              <div>
+                <dt>Good</dt>
+                <dd>{judgementCounts.Good}</dd>
+              </div>
+              <div>
+                <dt>Miss</dt>
+                <dd>{judgementCounts.Miss}</dd>
+              </div>
+            </dl>
+            <button type="button" onClick={resetGame}>
+              OK
+            </button>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
