@@ -1,6 +1,16 @@
 import { Midi } from '@tonejs/midi';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownUp, ArrowLeftRight, FileMusic, Pause, Play, RotateCcw, Volume2 } from 'lucide-react';
+import {
+  ArrowDownUp,
+  ArrowLeftRight,
+  FileMusic,
+  Pause,
+  Play,
+  RotateCcw,
+  Settings,
+  Volume2,
+  X,
+} from 'lucide-react';
 
 const DEFAULT_SONG_LENGTH = 46;
 const PREROLL_SECONDS = 3;
@@ -37,6 +47,33 @@ const DEFAULT_BURST = {
     };
   }),
 };
+const builtinMidiModules = import.meta.glob('./music/mid/*.mid', {
+  eager: true,
+  import: 'default',
+  query: '?url',
+});
+const BUILTIN_MIDI_TRACKS = Object.entries(builtinMidiModules)
+  .map(([path, url]) => {
+    const fileName = path.split('/').pop() ?? 'Built-in MIDI.mid';
+    const title = fileName
+      .replace(/\.mid$/i, '')
+      .replace(/\.mid$/i, '')
+      .replace(/\s*\([^)]*\)\s*$/g, '')
+      .replace(/_/g, ' ')
+      .trim();
+
+    return {
+      fileName,
+      title: title || fileName,
+      url,
+    };
+  })
+  .sort((a, b) => a.title.localeCompare(b.title));
+
+function getDifficultyStars(level) {
+  if (!level) return '☆☆☆☆☆';
+  return `${'★'.repeat(level)}${'☆'.repeat(5 - level)}`;
+}
 
 function midiToFrequency(midi) {
   return 440 * 2 ** ((midi - 69) / 12);
@@ -693,10 +730,13 @@ function createToneEngine() {
     oscillator.addEventListener('ended', () => scheduledNodes.delete(oscillator));
   };
 
-  const playHitSlap = (pitchStep = 0) => {
+  const playHitSlap = (pitchStep = 0, volume = 1) => {
+    if (volume <= 0) return;
+
     const now = context.currentTime;
     const start = now + 0.002;
     const pitchRatio = 2 ** (pitchStep / 12);
+    const hitVolume = Math.min(1, Math.max(0, volume));
 
     const bodyOscillator = context.createOscillator();
     const bodyGain = context.createGain();
@@ -704,7 +744,7 @@ function createToneEngine() {
     bodyOscillator.frequency.setValueAtTime(1320 * pitchRatio, start);
     bodyOscillator.frequency.exponentialRampToValueAtTime(420 * pitchRatio, start + 0.055);
     bodyGain.gain.setValueAtTime(0.001, start);
-    bodyGain.gain.exponentialRampToValueAtTime(0.22, start + 0.004);
+    bodyGain.gain.exponentialRampToValueAtTime(0.22 * hitVolume, start + 0.004);
     bodyGain.gain.exponentialRampToValueAtTime(0.001, start + 0.07);
     bodyOscillator.connect(bodyGain);
     bodyGain.connect(master);
@@ -718,7 +758,7 @@ function createToneEngine() {
     clickOscillator.type = 'square';
     clickOscillator.frequency.setValueAtTime(2400 * pitchRatio, start);
     clickGain.gain.setValueAtTime(0.001, start);
-    clickGain.gain.exponentialRampToValueAtTime(0.12, start + 0.002);
+    clickGain.gain.exponentialRampToValueAtTime(0.12 * hitVolume, start + 0.002);
     clickGain.gain.exponentialRampToValueAtTime(0.001, start + 0.018);
     clickOscillator.connect(clickGain);
     clickGain.connect(master);
@@ -743,7 +783,7 @@ function createToneEngine() {
     noiseFilter.frequency.setValueAtTime(1850 * pitchRatio, start);
     noiseFilter.Q.value = 1.7;
     noiseGain.gain.setValueAtTime(0.001, start);
-    noiseGain.gain.exponentialRampToValueAtTime(0.16, start + 0.003);
+    noiseGain.gain.exponentialRampToValueAtTime(0.16 * hitVolume, start + 0.003);
     noiseGain.gain.exponentialRampToValueAtTime(0.001, start + 0.048);
     noiseSource.connect(noiseFilter);
     noiseFilter.connect(noiseGain);
@@ -784,8 +824,8 @@ function createToneEngine() {
     scheduledNoteIds.clear();
   };
 
-  const hit = (pitchStep = 0) => {
-    playHitSlap(pitchStep);
+  const hit = (pitchStep = 0, volume = 1) => {
+    playHitSlap(pitchStep, volume);
   };
 
   return { context, scheduleSongWindow, stopSong, resetSongSchedule, hit };
@@ -807,6 +847,10 @@ function App() {
   const [tapFlash, setTapFlash] = useState(false);
   const [hintEnabled, setHintEnabled] = useState(false);
   const [flowDirection, setFlowDirection] = useState('horizontal');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sfxVolume, setSfxVolume] = useState(70);
+  const [selectedBuiltinMidi, setSelectedBuiltinMidi] = useState('');
+  const [builtinDifficulties, setBuiltinDifficulties] = useState({});
   const [stripSize, setStripSize] = useState({ width: 0, height: 0 });
   const [loadError, setLoadError] = useState('');
   const engineRef = useRef(null);
@@ -845,6 +889,17 @@ function App() {
     resetScore(song.measures);
   }, [resetScore, song.measures]);
 
+  const loadMidiBuffer = useCallback(
+    (buffer, fileName) => {
+      const midi = new Midi(buffer);
+      const nextSong = convertMidiToSong(midi, fileName);
+      setSong(nextSong);
+      setLoadError('');
+      resetScore(nextSong.measures, 'Loaded');
+    },
+    [resetScore],
+  );
+
   const handleMidiFile = useCallback(
     async (event) => {
       const file = event.target.files?.[0];
@@ -852,11 +907,8 @@ function App() {
 
       try {
         const buffer = await file.arrayBuffer();
-        const midi = new Midi(buffer);
-        const nextSong = convertMidiToSong(midi, file.name);
-        setSong(nextSong);
-        setLoadError('');
-        resetScore(nextSong.measures, 'Loaded');
+        loadMidiBuffer(buffer, file.name);
+        setSelectedBuiltinMidi('');
       } catch (error) {
         setLoadError(error instanceof Error ? error.message : 'Could not read this MIDI file.');
         setJudgement('Load failed');
@@ -864,8 +916,93 @@ function App() {
         event.target.value = '';
       }
     },
-    [resetScore],
+    [loadMidiBuffer],
   );
+
+  const handleBuiltinMidi = useCallback(
+    async (event) => {
+      const url = event.target.value;
+      setSelectedBuiltinMidi(url);
+      if (!url) return;
+
+      const track = BUILTIN_MIDI_TRACKS.find((item) => item.url === url);
+
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Could not load ${track?.title ?? 'selected MIDI'}.`);
+        const buffer = await response.arrayBuffer();
+        loadMidiBuffer(buffer, track?.fileName ?? 'Built-in MIDI.mid');
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : 'Could not load this built-in MIDI.');
+        setJudgement('Load failed');
+      }
+    },
+    [loadMidiBuffer],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadDifficulties = async () => {
+      const results = await Promise.all(
+        BUILTIN_MIDI_TRACKS.map(async (track) => {
+          try {
+            const response = await fetch(track.url);
+            if (!response.ok) throw new Error('MIDI asset load failed.');
+            const buffer = await response.arrayBuffer();
+            const midi = new Midi(buffer);
+            const parsedSong = convertMidiToSong(midi, track.fileName);
+            const playableDuration = Math.max(1, parsedSong.duration - PREROLL_SECONDS);
+            return {
+              speed: parsedSong.gameNoteCount / playableDuration,
+              url: track.url,
+            };
+          } catch {
+            return {
+              speed: null,
+              url: track.url,
+            };
+          }
+        }),
+      );
+
+      if (cancelled) return;
+
+      const validSpeeds = results
+        .map((item) => item.speed)
+        .filter((speed) => typeof speed === 'number' && Number.isFinite(speed));
+      if (!validSpeeds.length) {
+        setBuiltinDifficulties(
+          Object.fromEntries(results.map((item) => [item.url, { level: null, speed: null }])),
+        );
+        return;
+      }
+      const minSpeed = Math.min(...validSpeeds);
+      const maxSpeed = Math.max(...validSpeeds);
+
+      setBuiltinDifficulties(
+        Object.fromEntries(
+          results.map((item) => {
+            if (typeof item.speed !== 'number' || !Number.isFinite(item.speed)) {
+              return [item.url, { level: null, speed: null }];
+            }
+
+            const level =
+              maxSpeed === minSpeed
+                ? 3
+                : Math.max(1, Math.min(5, 1 + Math.round(((item.speed - minSpeed) / (maxSpeed - minSpeed)) * 4)));
+            return [item.url, { level, speed: item.speed }];
+          }),
+        ),
+      );
+    };
+
+    loadDifficulties();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const startGame = useCallback(async () => {
     if (!engineRef.current) engineRef.current = createToneEngine();
@@ -984,7 +1121,7 @@ function App() {
     setAttempts((value) => value + 1);
 
     if (result.id) {
-      engineRef.current?.hit((hitMeasureDotCount - 2) * 4);
+      engineRef.current?.hit((hitMeasureDotCount - 2) * 4, sfxVolume / 100);
       setSuccessfulHits((value) => value + 1);
       setScore((value) => value + result.score + combo * 6);
       setCombo((value) => {
@@ -997,7 +1134,7 @@ function App() {
       setCombo(0);
       setComboBurst((burst) => ({ combo: 0, id: burst.id + 1, judgement: 'Miss' }));
     }
-  }, [combo, gameState, getLiveSongTime, measures]);
+  }, [combo, gameState, getLiveSongTime, measures, sfxVolume]);
 
   useEffect(() => {
     if (gameState !== 'playing') return undefined;
@@ -1148,6 +1285,20 @@ function App() {
               <h1>{song.title}</h1>
             </div>
             <div className="controls">
+              <label className="builtin-picker" aria-label="Choose built-in MIDI">
+                <span>MIDI</span>
+                <select onChange={handleBuiltinMidi} value={selectedBuiltinMidi}>
+                  <option value="">Built-in songs</option>
+                  {BUILTIN_MIDI_TRACKS.map((track) => {
+                    const difficulty = builtinDifficulties[track.url];
+                    return (
+                      <option key={track.url} value={track.url}>
+                        {`${getDifficultyStars(difficulty?.level)} ${track.title}`}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
               <label className="file-button" aria-label="Choose MIDI file">
                 <FileMusic size={18} />
                 <input type="file" accept=".mid,.midi,audio/midi,audio/x-midi" onChange={handleMidiFile} />
@@ -1166,23 +1317,72 @@ function App() {
               </button>
               <button
                 type="button"
-                className={hintEnabled ? 'active' : ''}
-                onClick={() => setHintEnabled((value) => !value)}
-                aria-label="Toggle hint"
+                className={settingsOpen ? 'active' : ''}
+                onClick={() => setSettingsOpen((value) => !value)}
+                aria-label="Open settings"
               >
-                H
-              </button>
-              <button
-                type="button"
-                className={flowDirection === 'vertical' ? 'active' : ''}
-                onClick={() => setFlowDirection((value) => (value === 'horizontal' ? 'vertical' : 'horizontal'))}
-                aria-label="Toggle box flow"
-                title={flowDirection === 'horizontal' ? 'Horizontal flow' : 'Vertical flow'}
-              >
-                {flowDirection === 'horizontal' ? <ArrowLeftRight size={18} /> : <ArrowDownUp size={18} />}
+                <Settings size={18} />
               </button>
             </div>
           </header>
+
+          {settingsOpen ? (
+            <div className="settings-popover" role="dialog" aria-label="Settings">
+              <div className="settings-panel">
+                <div className="settings-header">
+                  <strong>Settings</strong>
+                  <button type="button" onClick={() => setSettingsOpen(false)} aria-label="Close settings">
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div className="settings-list">
+                  <label className="setting-row">
+                    <span>
+                      <strong>Hint</strong>
+                      <small>{hintEnabled ? 'On' : 'Off'}</small>
+                    </span>
+                    <input
+                      checked={hintEnabled}
+                      onChange={(event) => setHintEnabled(event.target.checked)}
+                      type="checkbox"
+                    />
+                  </label>
+
+                  <div className="setting-row">
+                    <span>
+                      <strong>Flow</strong>
+                      <small>{flowDirection === 'horizontal' ? 'Left' : 'Down'}</small>
+                    </span>
+                    <button
+                      type="button"
+                      className="flow-toggle"
+                      onClick={() =>
+                        setFlowDirection((value) => (value === 'horizontal' ? 'vertical' : 'horizontal'))
+                      }
+                      aria-label="Toggle box flow"
+                    >
+                      {flowDirection === 'horizontal' ? <ArrowLeftRight size={18} /> : <ArrowDownUp size={18} />}
+                    </button>
+                  </div>
+
+                  <label className="setting-slider">
+                    <span>
+                      <strong>Hit SFX</strong>
+                      <small>{sfxVolume}%</small>
+                    </span>
+                    <input
+                      max="100"
+                      min="0"
+                      onChange={(event) => setSfxVolume(Number(event.target.value))}
+                      type="range"
+                      value={sfxVolume}
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <button
             ref={measureStripRef}

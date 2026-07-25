@@ -58,6 +58,7 @@ button {
 }
 
 .stage {
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) 8px;
   min-height: 0;
@@ -90,6 +91,7 @@ h1 {
 
 .controls {
   display: flex;
+  align-items: center;
   gap: 10px;
 }
 
@@ -106,11 +108,145 @@ h1 {
   cursor: pointer;
 }
 
+.builtin-picker {
+  height: 44px;
+  width: min(260px, 30vw);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #f8fbff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.builtin-picker span {
+  color: rgba(248, 251, 255, 0.6);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.builtin-picker select {
+  min-width: 0;
+  border: 0;
+  color: #f8fbff;
+  background: transparent;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.builtin-picker select:focus-visible {
+  outline: 2px solid #36cfc9;
+  outline-offset: 3px;
+}
+
+.builtin-picker option {
+  color: #101219;
+}
+
 .controls button.active {
   border-color: rgba(54, 207, 201, 0.72);
   color: #101219;
   background: #36cfc9;
   font-weight: 900;
+}
+
+.settings-popover {
+  position: absolute;
+  right: 22px;
+  top: 82px;
+  z-index: 30;
+  width: min(360px, calc(100% - 44px));
+}
+
+.settings-panel {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(18, 20, 28, 0.96);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(18px);
+  padding: 14px;
+}
+
+.settings-header,
+.setting-row,
+.setting-slider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.settings-header {
+  margin-bottom: 12px;
+}
+
+.settings-header strong,
+.setting-row strong,
+.setting-slider strong {
+  font-size: 0.95rem;
+}
+
+.settings-header button,
+.flow-toggle {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  color: #f8fbff;
+  background: rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+}
+
+.settings-list {
+  display: grid;
+  gap: 10px;
+}
+
+.setting-row,
+.setting-slider {
+  min-height: 58px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.setting-row span,
+.setting-slider span {
+  display: grid;
+  gap: 3px;
+}
+
+.setting-row small,
+.setting-slider small {
+  color: rgba(248, 251, 255, 0.58);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.setting-row input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  accent-color: #36cfc9;
+  cursor: pointer;
+}
+
+.setting-slider {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.setting-slider input[type="range"] {
+  width: 100%;
+  accent-color: #36cfc9;
+  cursor: pointer;
 }
 
 .file-button input {
@@ -795,6 +931,25 @@ dd {
   .topbar {
     min-height: 78px;
     padding: 16px;
+  }
+
+  .controls {
+    gap: 8px;
+  }
+
+  .builtin-picker {
+    width: min(210px, 40vw);
+    padding: 0 8px;
+  }
+
+  .builtin-picker span {
+    display: none;
+  }
+
+  .settings-popover {
+    right: 12px;
+    top: 72px;
+    width: min(340px, calc(100% - 24px));
   }
 
   h1 {
