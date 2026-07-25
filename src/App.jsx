@@ -482,7 +482,8 @@ function pruneDenseMelody(candidates, boxSlots) {
 }
 
 function chooseMusicalGrid({ beatsPerMeasure, midi, notes, normalizedBeatTicks }) {
-  const subdivisionCandidates = [1, 2, 4];
+  const subdivisionCandidates = [1, 2, 3, 4, 6, 8];
+  const eligibleNoteCount = Math.max(1, notes.filter((note) => note.midi >= MELODY_MIN_MIDI).length);
   const scoredSubdivisions = subdivisionCandidates.map((subdivision) => {
     const slotDurationTicks = normalizedBeatTicks / subdivision;
     const slotsPerMeasure = beatsPerMeasure * subdivision;
@@ -492,6 +493,7 @@ function chooseMusicalGrid({ beatsPerMeasure, midi, notes, normalizedBeatTicks }
     const measureCount = Math.max(1, Math.ceil(midi.durationTicks / boxDurationTicks));
     const averageBoxSeconds = midi.duration / measureCount;
     const slotKeys = new Set();
+    let capturedNotes = 0;
     let totalError = 0;
 
     notes.forEach((note) => {
@@ -501,25 +503,33 @@ function chooseMusicalGrid({ beatsPerMeasure, midi, notes, normalizedBeatTicks }
       const distance = Math.abs(note.ticks - quantizedTicks);
       if (distance > slotDurationTicks * 0.32) return;
       slotKeys.add(globalSlot);
+      capturedNotes += 1;
       totalError += distance / slotDurationTicks;
     });
 
     const averageError = totalError / Math.max(1, slotKeys.size);
+    const coverageRatio = capturedNotes / eligibleNoteCount;
     const fillRatio = slotKeys.size / Math.max(1, Math.ceil(midi.durationTicks / slotDurationTicks));
-    const shortBoxPenalty = averageBoxSeconds < 0.85 ? (0.85 - averageBoxSeconds) * 28 : 0;
-    const unreadableBoxPenalty = averageBoxSeconds < 0.75 ? (0.75 - averageBoxSeconds) * 90 : 0;
+    const shortBoxPenalty = averageBoxSeconds < 0.42 ? (0.42 - averageBoxSeconds) * 35 : 0;
+    const unreadableBoxPenalty = averageBoxSeconds < 0.28 ? (0.28 - averageBoxSeconds) * 95 : 0;
     const longBoxPenalty = averageBoxSeconds > 1.9 ? (averageBoxSeconds - 1.9) * 8 : 0;
+    const sparsePenalty = coverageRatio < 0.62 ? (0.62 - coverageRatio) * 38 : 0;
     const score =
-      Math.log2(slotKeys.size + 1) * 2.2 -
+      coverageRatio * 42 +
+      Math.log2(slotKeys.size + 1) * 1.4 -
       averageError * 18 -
-      Math.abs(fillRatio - 0.42) * 5 -
-      Math.abs(averageBoxSeconds - 1.15) * 8 -
+      Math.abs(fillRatio - 0.46) * 4 -
+      Math.abs(averageBoxSeconds - 0.72) * 3.2 -
       shortBoxPenalty -
       unreadableBoxPenalty -
       longBoxPenalty -
-      subdivision * 0.8;
+      sparsePenalty -
+      subdivision * 0.65;
 
     return {
+      averageBoxSeconds,
+      capturedNotes,
+      coverageRatio,
       score,
       slotsPerMeasure,
       subdivision,
