@@ -25,6 +25,9 @@ const REFERENCE_BPM = 120;
 const MAX_NATIVE_BPM = 240;
 const GAME_BOX_SLOTS = 4;
 const MELODY_MIN_MIDI = 48;
+const TARGET_MAX_GAME_NOTES_PER_SECOND = 6.2;
+const HARD_MAX_GAME_NOTES_PER_SECOND = 7.2;
+const MIN_PLAYABLE_BOX_SECONDS = 0.32;
 const JUDGEMENTS = [
   { name: 'Perfect', window: 0.055, score: 1000 },
   { name: 'Good', window: 0.16, score: 450 },
@@ -518,6 +521,47 @@ function pruneDenseMelody(candidates, boxSlots) {
     .sort((a, b) => a.measureIndex - b.measureIndex || a.beatIndex - b.beatIndex);
 }
 
+function limitPlayableDensity(candidates, duration) {
+  const targetCount = Math.max(1, Math.floor(duration * TARGET_MAX_GAME_NOTES_PER_SECOND));
+  if (candidates.length <= targetCount) return candidates;
+
+  const sorted = [...candidates].sort((a, b) => a.measureIndex - b.measureIndex || a.beatIndex - b.beatIndex);
+  const minGapSeconds = 1 / HARD_MAX_GAME_NOTES_PER_SECOND;
+  const selected = [];
+  let lastKeptTime = -Infinity;
+
+  sorted.forEach((candidate, index) => {
+    const previous = sorted[index - 1];
+    const next = sorted[index + 1];
+    const melodicChange = Math.max(
+      previous ? Math.abs(candidate.midi - previous.midi) : 0,
+      next ? Math.abs(candidate.midi - next.midi) : 0,
+    );
+    const importance =
+      (candidate.beatIndex === 0 ? 2.4 : 0) +
+      Math.min(2, melodicChange / 7) +
+      Math.min(1.2, (candidate.duration ?? 0) / 0.45) +
+      (candidate.velocity ?? 0.5) * 0.8 +
+      (candidate.melodyScore ?? 0);
+
+    const hasEnoughGap = candidate.time - lastKeptTime >= minGapSeconds;
+    const stillNeedNotes = selected.length < targetCount;
+    if (stillNeedNotes && (hasEnoughGap || importance >= 3.8)) {
+      selected.push({ ...candidate, densityImportance: importance });
+      lastKeptTime = candidate.time;
+    }
+  });
+
+  if (selected.length <= targetCount) {
+    return selected.sort((a, b) => a.measureIndex - b.measureIndex || a.beatIndex - b.beatIndex);
+  }
+
+  return selected
+    .sort((a, b) => b.densityImportance - a.densityImportance || a.time - b.time)
+    .slice(0, targetCount)
+    .sort((a, b) => a.measureIndex - b.measureIndex || a.beatIndex - b.beatIndex);
+}
+
 function chooseMusicalGrid({ beatsPerMeasure, midi, notes, normalizedBeatTicks }) {
   const subdivisionCandidates = [1, 2, 3, 4, 6, 8];
   const eligibleNoteCount = Math.max(1, notes.filter((note) => note.midi >= MELODY_MIN_MIDI).length);
@@ -547,10 +591,16 @@ function chooseMusicalGrid({ beatsPerMeasure, midi, notes, normalizedBeatTicks }
     const averageError = totalError / Math.max(1, slotKeys.size);
     const coverageRatio = capturedNotes / eligibleNoteCount;
     const fillRatio = slotKeys.size / Math.max(1, Math.ceil(midi.durationTicks / slotDurationTicks));
-    const shortBoxPenalty = averageBoxSeconds < 0.42 ? (0.42 - averageBoxSeconds) * 35 : 0;
+    const rawNotesPerSecond = slotKeys.size / Math.max(1, midi.duration);
+    const shortBoxPenalty =
+      averageBoxSeconds < MIN_PLAYABLE_BOX_SECONDS ? (MIN_PLAYABLE_BOX_SECONDS - averageBoxSeconds) * 85 : 0;
     const unreadableBoxPenalty = averageBoxSeconds < 0.28 ? (0.28 - averageBoxSeconds) * 95 : 0;
     const longBoxPenalty = averageBoxSeconds > 1.9 ? (averageBoxSeconds - 1.9) * 8 : 0;
     const sparsePenalty = coverageRatio < 0.62 ? (0.62 - coverageRatio) * 38 : 0;
+    const densityPenalty =
+      rawNotesPerSecond > TARGET_MAX_GAME_NOTES_PER_SECOND
+        ? (rawNotesPerSecond - TARGET_MAX_GAME_NOTES_PER_SECOND) * 9
+        : 0;
     const score =
       coverageRatio * 42 +
       Math.log2(slotKeys.size + 1) * 1.4 -
@@ -561,12 +611,14 @@ function chooseMusicalGrid({ beatsPerMeasure, midi, notes, normalizedBeatTicks }
       unreadableBoxPenalty -
       longBoxPenalty -
       sparsePenalty -
+      densityPenalty -
       subdivision * 0.65;
 
     return {
       averageBoxSeconds,
       capturedNotes,
       coverageRatio,
+      rawNotesPerSecond,
       score,
       slotsPerMeasure,
       subdivision,
@@ -620,7 +672,7 @@ function chooseMusicalGrid({ beatsPerMeasure, midi, notes, normalizedBeatTicks }
   return {
     boxDurationTicks,
     boxSlots,
-    candidates: pruneDenseMelody(candidates, boxSlots),
+    candidates: limitPlayableDensity(pruneDenseMelody(candidates, boxSlots), midi.duration),
     slotDurationTicks,
     subdivision: selected.subdivision,
   };
